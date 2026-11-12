@@ -161,6 +161,12 @@ def main():
         })
     # keep only coins plausibly able to reach the top fight (cap floor + a margin)
     coins = [c for c in coins if c["L"] >= CONTEND - 1.0]
+    # deterministic expected drift per coin, from its own regime odds
+    for c in coins:
+        cp, hp, fp = regime_probs(c["m"])
+        climb = CLIMB_FLOOR + CLIMB_MOM * min(c["m"], 0.9)
+        c["edrift"] = cp * climb + hp * HOLD_DRIFT + fp * FADE_DRIFT
+    coin_by_mint = {c["mint"]: c for c in coins}
 
     # ---- Monte Carlo over the horizon
     # per-read top-5 counts and size samples
@@ -240,11 +246,18 @@ def main():
     # reads. The expected place-k cap is anchored to the coin currently in kth
     # place (the k-th market cap at the cut), drifting only slightly.
     avg_dt_h = max(avg_dt, 0.05)
-    size_sd = min(0.95, max(0.30, 0.32 * math.sqrt(avg_dt_h)))
-    size_drift = -0.012
+    size_sd = min(0.75, max(0.28, 0.24 * math.sqrt(avg_dt_h)))
+    size_drift = -0.02
     sizes = []
     for k in range(1, places + 1):
-        if k <= len(last_rows):
+        # anchor each place's size to its most likely holder's expected cap
+        holder = None
+        if place_count[k]:
+            holder_mint = max(place_count[k].items(), key=lambda kv: kv[1])[0]
+            holder = coin_by_mint.get(holder_mint)
+        if holder is not None:
+            mu = holder["L"] + holder["edrift"] * avg_dt_h
+        elif k <= len(last_rows):
             mu = size_of(last_rows[k - 1]["market_cap_lamports"]) + size_drift * avg_dt_h
         else:
             mu = math.log10(1800.0) + size_drift * avg_dt_h
