@@ -235,23 +235,21 @@ def main():
             if p >= MIN_P:
                 probabilities.append({"mint": mint, "place": k, "p": p})
 
-    # ---- size bins per place (a controlled normal at the place's expected cap)
+    # ---- size bins per place: a horizon-aware normal at the place's expected cap.
+    # The cap moves by roughly sqrt(horizon): tight near the cut, wide by the far
+    # reads. The expected place-k cap is anchored to the coin currently in kth
+    # place (the k-th market cap at the cut), drifting only slightly.
+    avg_dt_h = max(avg_dt, 0.05)
+    size_sd = min(0.95, max(0.30, 0.32 * math.sqrt(avg_dt_h)))
+    size_drift = -0.012
     sizes = []
     for k in range(1, places + 1):
-        mom = place_mom[k]
-        n = mom[0]
-        if n >= 8:
-            mu = mom[1] / n
-            var = max(0.16, mom[2] / n - mu * mu)
-            sd = min(1.1, math.sqrt(var))
+        if k <= len(last_rows):
+            mu = size_of(last_rows[k - 1]["market_cap_lamports"]) + size_drift * avg_dt_h
         else:
-            if k <= len(last_rows):
-                mu = size_of(last_rows[k - 1]["market_cap_lamports"]) + HOLD_DRIFT * avg_dt
-            else:
-                mu = math.log10(1500.0)
-            sd = 0.55
+            mu = math.log10(1800.0) + size_drift * avg_dt_h
         arr = [norm_area(-math.inf if bi == 0 else edges[bi - 1],
-                         math.inf if bi == nbins - 1 else edges[bi], mu, sd)
+                         math.inf if bi == nbins - 1 else edges[bi], mu, size_sd)
                for bi in range(nbins)]
         # a monster newcomer can land a much larger cap than any known coin:
         # hedge a share of each place's size on the top bins.
